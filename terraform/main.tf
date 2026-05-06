@@ -1,72 +1,82 @@
-########################################
-# Provider
-########################################
-provider "aws" {
-  region = "ap-south-1"
+# -------------------------
+# IAM Role for EKS Cluster
+# -------------------------
+
+# Create an IAM assume role policy document for EKS cluster
+data "aws_iam_policy_document" "assume_role" {
+  statement {
+    effect = "Allow"
+
+    # Allow EKS service (eks.amazonaws.com) to assume the role
+    principals {
+      type        = "Service"
+      identifiers = ["eks.amazonaws.com"]
+    }
+
+    # Allow STS assume role action
+    actions = ["sts:AssumeRole"]
+  }
 }
 
-########################################
-# Get Default VPC & Subnets
-########################################
+# Create IAM Role for EKS Cluster
+resource "aws_iam_role" "example" {
+  name               = "eks-cluster-cloud"
+  assume_role_policy = data.aws_iam_policy_document.assume_role.json
+}
+
+# Attach AmazonEKSClusterPolicy to the IAM Role
+# This policy allows the cluster to manage AWS resources
+resource "aws_iam_role_policy_attachment" "example-AmazonEKSClusterPolicy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+  role       = aws_iam_role.example.name
+}
+
+# -------------------------
+# Networking Setup
+# -------------------------
+
+# Get default VPC
 data "aws_vpc" "default" {
   default = true
 }
 
-data "aws_subnets" "default" {
+# Get public subnets from the default VPC
+data "aws_subnets" "public" {
   filter {
     name   = "vpc-id"
     values = [data.aws_vpc.default.id]
   }
 }
 
-########################################
-# IAM Role for EKS Cluster
-########################################
-resource "aws_iam_role" "eks_cluster_role" {
-  name = "ollama-cluster-role"
+# -------------------------
+# EKS Cluster Setup
+# -------------------------
 
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Principal = {
-        Service = "eks.amazonaws.com"
-      }
-      Action = "sts:AssumeRole"
-    }]
-  })
-}
+resource "aws_eks_cluster" "example" {
+  name     = "EKS_CLOUD"
+  role_arn = aws_iam_role.example.arn
 
-resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
-  role       = aws_iam_role.eks_cluster_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
-}
-
-########################################
-# EKS Cluster
-########################################
-resource "aws_eks_cluster" "eks_cluster" {
-  name     = "ollama-cluster"
-  role_arn = aws_iam_role.eks_cluster_role.arn
-  version  = "1.29"
-
+  # Attach cluster to VPC subnets
   vpc_config {
-    subnet_ids = data.aws_subnets.default.ids
+    subnet_ids = data.aws_subnets.public.ids
   }
 
+  # Ensure IAM Role permissions are created before the cluster
   depends_on = [
-    aws_iam_role_policy_attachment.eks_cluster_policy
+    aws_iam_role_policy_attachment.example-AmazonEKSClusterPolicy,
   ]
 }
 
-########################################
+# -------------------------
 # IAM Role for Node Group
-########################################
-resource "aws_iam_role" "eks_node_role" {
-  name = "ollama-node-role"
+# -------------------------
 
+# Create IAM Role for EKS Node Group (EC2 Instances)
+resource "aws_iam_role" "example1" {
+  name = "eks-node-group-cloud"
+
+  # Allow EC2 instances to assume the role
   assume_role_policy = jsonencode({
-    Version = "2012-10-17"
     Statement = [{
       Action = "sts:AssumeRole"
       Effect = "Allow"
@@ -74,112 +84,53 @@ resource "aws_iam_role" "eks_node_role" {
         Service = "ec2.amazonaws.com"
       }
     }]
+    Version = "2012-10-17"
   })
 }
 
-resource "aws_iam_role_policy_attachment" "node_worker_policy" {
-  role       = aws_iam_role.eks_node_role.name
+# Attach worker node policies required for Node Group
+# 1. AmazonEKSWorkerNodePolicy → Allows worker nodes to join the cluster
+resource "aws_iam_role_policy_attachment" "example-AmazonEKSWorkerNodePolicy" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+  role       = aws_iam_role.example1.name
 }
 
-resource "aws_iam_role_policy_attachment" "node_cni_policy" {
-  role       = aws_iam_role.eks_node_role.name
+# 2. AmazonEKS_CNI_Policy → Allows networking (VPC CNI plugin)
+resource "aws_iam_role_policy_attachment" "example-AmazonEKS_CNI_Policy" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+  role       = aws_iam_role.example1.name
 }
 
-resource "aws_iam_role_policy_attachment" "node_ecr_policy" {
-  role       = aws_iam_role.eks_node_role.name
+# 3. AmazonEC2ContainerRegistryReadOnly → Allows pulling container images from ECR
+resource "aws_iam_role_policy_attachment" "example-AmazonEC2ContainerRegistryReadOnly" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+  role       = aws_iam_role.example1.name
 }
 
-########################################
-# EKS Node Group
-########################################
-resource "aws_eks_node_group" "ollama_nodes" {
-  cluster_name    = aws_eks_cluster.eks_cluster.name
-  node_group_name = "ollama-node-group"
-  node_role_arn   = aws_iam_role.eks_node_role.arn
-  subnet_ids      = data.aws_subnets.default.ids
+# -------------------------
+# EKS Node Group Setup
+# -------------------------
 
+resource "aws_eks_node_group" "example" {
+  cluster_name    = aws_eks_cluster.example.name
+  node_group_name = "Node-cloud"
+  node_role_arn   = aws_iam_role.example1.arn
+  subnet_ids      = data.aws_subnets.public.ids
+
+  # Auto-scaling configuration for node group
   scaling_config {
-    desired_size = 2
-    max_size     = 3
-    min_size     = 1
+    desired_size = 1  # Default number of nodes
+    max_size     = 2  # Maximum number of nodes
+    min_size     = 1  # Minimum number of nodes
   }
 
+  # EC2 instance type for worker nodes
   instance_types = ["c7i-flex.large"]
 
-  capacity_type = "ON_DEMAND"
-
+  # Ensure IAM Role policies are created before node group
   depends_on = [
-    aws_iam_role_policy_attachment.node_worker_policy,
-    aws_iam_role_policy_attachment.node_cni_policy,
-    aws_iam_role_policy_attachment.node_ecr_policy
+    aws_iam_role_policy_attachment.example-AmazonEKSWorkerNodePolicy,
+    aws_iam_role_policy_attachment.example-AmazonEKS_CNI_Policy,
+    aws_iam_role_policy_attachment.example-AmazonEC2ContainerRegistryReadOnly,
   ]
-}
-
-########################################
-# OPTIONAL: RDS (Remove if not needed)
-########################################
-
-resource "aws_security_group" "rds_sg" {
-  name   = "ollama-rds-sg"
-  vpc_id = data.aws_vpc.default.id
-
-  ingress {
-    from_port   = 3306
-    to_port     = 3306
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"] # ⚠ Restrict in production
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
-
-resource "aws_db_subnet_group" "rds_subnet" {
-  name       = "ollama-rds-subnet-group"
-  subnet_ids = data.aws_subnets.default.ids
-}
-
-resource "aws_db_instance" "mariadb" {
-  identifier             = "ollama-mariadb"
-  allocated_storage      = 20
-  engine                 = "mariadb"
-  engine_version         = "11.4"
-  instance_class         = "db.t4g.micro"
-
-  db_name  = "ollamadb"
-  username = "admin"
-  password = "StrongPassword123!"   # 🔴 Change this
-
-  db_subnet_group_name   = aws_db_subnet_group.rds_subnet.name
-  vpc_security_group_ids = [aws_security_group.rds_sg.id]
-
-  publicly_accessible = true
-  skip_final_snapshot = true
-  multi_az            = false
-}
-
-########################################
-# Outputs
-########################################
-output "eks_cluster_name" {
-  value = aws_eks_cluster.eks_cluster.name
-}
-
-output "eks_endpoint" {
-  value = aws_eks_cluster.eks_cluster.endpoint
-}
-
-output "rds_endpoint" {
-  value = aws_db_instance.mariadb.address
-}
-
-output "rds_port" {
-  value = aws_db_instance.mariadb.port
 }
