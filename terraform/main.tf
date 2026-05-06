@@ -1,61 +1,42 @@
-# -------------------------
-# IAM Role for EKS Cluster
-# -------------------------
+########################################
+# IAM Assume Role for EKS Cluster
+########################################
 
-# Create an IAM assume role policy document for EKS cluster
 data "aws_iam_policy_document" "assume_role" {
   statement {
     effect = "Allow"
 
-    # Allow EKS service (eks.amazonaws.com) to assume the role
     principals {
       type        = "Service"
       identifiers = ["eks.amazonaws.com"]
     }
 
-    # Allow STS assume role action
     actions = ["sts:AssumeRole"]
   }
 }
 
-# Create IAM Role for EKS Cluster
-resource "aws_iam_role" "example" {
-  name               = "eks-cluster-cloud"
+########################################
+# EKS Cluster Role
+########################################
+
+resource "aws_iam_role" "ollama_cluster" {
+  name               = "ollama-cluster-role"
   assume_role_policy = data.aws_iam_policy_document.assume_role.json
 }
 
-# Attach AmazonEKSClusterPolicy to the IAM Role
-# This policy allows the cluster to manage AWS resources
-resource "aws_iam_role_policy_attachment" "example-AmazonEKSClusterPolicy" {
+resource "aws_iam_role_policy_attachment" "ollama_cluster_policy" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
-  role       = aws_iam_role.example.name
-}
-resource "aws_iam_role" "ebs_csi_driver" {
-  name = "eks-ebs-csi-driver-role"
-
-  assume_role_policy = data.aws_iam_policy_document.ebs_assume.json
+  role       = aws_iam_role.ollama_cluster.name
 }
 
-resource "aws_iam_role_policy_attachment" "ebs_policy" {
-  role       = aws_iam_role.ebs_csi_driver.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
-}
+########################################
+# Networking (Default VPC)
+########################################
 
-resource "aws_eks_addon" "ebs_csi" {
-  cluster_name             = aws_eks_cluster.main.name
-  addon_name               = "aws-ebs-csi-driver"
-  service_account_role_arn = aws_iam_role.ebs_csi_driver.arn
-}
-# -------------------------
-# Networking Setup
-# -------------------------
-
-# Get default VPC
 data "aws_vpc" "default" {
   default = true
 }
 
-# Get public subnets from the default VPC
 data "aws_subnets" "public" {
   filter {
     name   = "vpc-id"
@@ -63,89 +44,140 @@ data "aws_subnets" "public" {
   }
 }
 
-# -------------------------
-# EKS Cluster Setup
-# -------------------------
+########################################
+# EKS Cluster
+########################################
 
-resource "aws_eks_cluster" "example" {
-  name     = "EKS_CLOUD"
-  role_arn = aws_iam_role.example.arn
+resource "aws_eks_cluster" "ollama" {
+  name     = "ollama-cluster"
+  role_arn = aws_iam_role.ollama_cluster.arn
 
-  # Attach cluster to VPC subnets
   vpc_config {
     subnet_ids = data.aws_subnets.public.ids
   }
 
-  # Ensure IAM Role permissions are created before the cluster
   depends_on = [
-    aws_iam_role_policy_attachment.example-AmazonEKSClusterPolicy,
+    aws_iam_role_policy_attachment.ollama_cluster_policy
   ]
 }
 
-# -------------------------
-# IAM Role for Node Group
-# -------------------------
+########################################
+# Node Group IAM Role
+########################################
 
-# Create IAM Role for EKS Node Group (EC2 Instances)
-resource "aws_iam_role" "example1" {
-  name = "eks-node-group-cloud"
+resource "aws_iam_role" "ollama_node" {
+  name = "ollama-node-role"
 
-  # Allow EC2 instances to assume the role
   assume_role_policy = jsonencode({
+    Version = "2012-10-17"
     Statement = [{
-      Action = "sts:AssumeRole"
       Effect = "Allow"
+      Action = "sts:AssumeRole"
       Principal = {
         Service = "ec2.amazonaws.com"
       }
     }]
-    Version = "2012-10-17"
   })
 }
 
-# Attach worker node policies required for Node Group
-# 1. AmazonEKSWorkerNodePolicy → Allows worker nodes to join the cluster
-resource "aws_iam_role_policy_attachment" "example-AmazonEKSWorkerNodePolicy" {
+resource "aws_iam_role_policy_attachment" "ollama_worker" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
-  role       = aws_iam_role.example1.name
+  role       = aws_iam_role.ollama_node.name
 }
 
-# 2. AmazonEKS_CNI_Policy → Allows networking (VPC CNI plugin)
-resource "aws_iam_role_policy_attachment" "example-AmazonEKS_CNI_Policy" {
+resource "aws_iam_role_policy_attachment" "ollama_cni" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
-  role       = aws_iam_role.example1.name
+  role       = aws_iam_role.ollama_node.name
 }
 
-# 3. AmazonEC2ContainerRegistryReadOnly → Allows pulling container images from ECR
-resource "aws_iam_role_policy_attachment" "example-AmazonEC2ContainerRegistryReadOnly" {
+resource "aws_iam_role_policy_attachment" "ollama_ecr" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
-  role       = aws_iam_role.example1.name
+  role       = aws_iam_role.ollama_node.name
 }
 
-# -------------------------
-# EKS Node Group Setup
-# -------------------------
+########################################
+# Node Group
+########################################
 
-resource "aws_eks_node_group" "example" {
-  cluster_name    = aws_eks_cluster.example.name
-  node_group_name = "Node-cloud"
-  node_role_arn   = aws_iam_role.example1.arn
+resource "aws_eks_node_group" "ollama" {
+  cluster_name    = aws_eks_cluster.ollama.name
+  node_group_name = "ollama-node-group"
+  node_role_arn   = aws_iam_role.ollama_node.arn
   subnet_ids      = data.aws_subnets.public.ids
 
-  # Auto-scaling configuration for node group
   scaling_config {
-    desired_size = 1  # Default number of nodes
-    max_size     = 2  # Maximum number of nodes
-    min_size     = 1  # Minimum number of nodes
+    desired_size = 1
+    max_size     = 2
+    min_size     = 1
   }
 
-  # EC2 instance type for worker nodes
   instance_types = ["c7i-flex.large"]
+  capacity_type  = "ON_DEMAND"
 
-  # Ensure IAM Role policies are created before node group
   depends_on = [
-    aws_iam_role_policy_attachment.example-AmazonEKSWorkerNodePolicy,
-    aws_iam_role_policy_attachment.example-AmazonEKS_CNI_Policy,
-    aws_iam_role_policy_attachment.example-AmazonEC2ContainerRegistryReadOnly,
+    aws_iam_role_policy_attachment.ollama_worker,
+    aws_iam_role_policy_attachment.ollama_cni,
+    aws_iam_role_policy_attachment.ollama_ecr
+  ]
+}
+
+########################################
+# OIDC Provider (REQUIRED for EBS CSI)
+########################################
+
+data "aws_eks_cluster" "ollama" {
+  name = aws_eks_cluster.ollama.name
+}
+
+resource "aws_iam_openid_connect_provider" "ollama" {
+  client_id_list  = ["sts.amazonaws.com"]
+  thumbprint_list = ["9e99a48a9960b14926bb7f3b02e22da0ecd6cbe4"]
+
+  url = data.aws_eks_cluster.ollama.identity[0].oidc[0].issuer
+}
+
+########################################
+# EBS CSI IAM Role (FIX PVC ISSUE)
+########################################
+
+data "aws_iam_policy_document" "ebs_assume" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+    effect  = "Allow"
+
+    condition {
+      test     = "StringEquals"
+      variable = "${replace(aws_iam_openid_connect_provider.ollama.url, "https://", "")}:sub"
+      values   = ["system:serviceaccount:kube-system:ebs-csi-controller-sa"]
+    }
+
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.ollama.arn]
+    }
+  }
+}
+
+resource "aws_iam_role" "ollama_ebs_csi" {
+  name               = "ollama-ebs-csi-role"
+  assume_role_policy = data.aws_iam_policy_document.ebs_assume.json
+}
+
+resource "aws_iam_role_policy_attachment" "ollama_ebs_policy" {
+  role       = aws_iam_role.ollama_ebs_csi.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+}
+
+########################################
+# EBS CSI ADDON (CRITICAL)
+########################################
+
+resource "aws_eks_addon" "ollama_ebs_csi" {
+  cluster_name             = aws_eks_cluster.ollama.name
+  addon_name               = "aws-ebs-csi-driver"
+  service_account_role_arn = aws_iam_role.ollama_ebs_csi.arn
+
+  depends_on = [
+    aws_eks_node_group.ollama
   ]
 }
