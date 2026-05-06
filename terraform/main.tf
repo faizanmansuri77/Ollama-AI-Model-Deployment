@@ -30,7 +30,22 @@ resource "aws_iam_role_policy_attachment" "example-AmazonEKSClusterPolicy" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
   role       = aws_iam_role.example.name
 }
+resource "aws_iam_role" "ebs_csi_driver" {
+  name = "eks-ebs-csi-driver-role"
 
+  assume_role_policy = data.aws_iam_policy_document.ebs_assume.json
+}
+
+resource "aws_iam_role_policy_attachment" "ebs_policy" {
+  role       = aws_iam_role.ebs_csi_driver.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+}
+
+resource "aws_eks_addon" "ebs_csi" {
+  cluster_name             = aws_eks_cluster.main.name
+  addon_name               = "aws-ebs-csi-driver"
+  service_account_role_arn = aws_iam_role.ebs_csi_driver.arn
+}
 # -------------------------
 # Networking Setup
 # -------------------------
