@@ -14,14 +14,14 @@ spec:
         app: ollama
     spec:
       containers:
-        - name: ollama
-          image: ollama/ollama:latest
-          ports:
-            - containerPort: 11434
-          volumeMounts:
-            - name: ollama-storage
-              mountPath: /root/.ollama
+      - name: ollama
+        image: ollama/ollama:latest
+        ports:
+        - containerPort: 11434
+        volumeMounts:
+        - mountPath: /root/.ollama
+          name: ollama-storage
       volumes:
-        - name: ollama-storage
-          persistentVolumeClaim:
-            claimName: ollama-pvc
+      - name: ollama-storage
+        persistentVolumeClaim:
+          claimName: ollama-pvc
