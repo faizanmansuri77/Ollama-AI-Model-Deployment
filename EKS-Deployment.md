@@ -352,7 +352,7 @@ spec:
       containers:
       - name: backend
 
-        image: <aws-account-id>.dkr.ecr.ap-south-1.amazonaws.com/ai-backend:latest
+        image: orionpax77/ollama:backend
 
         ports:
         - containerPort: 5000
@@ -408,7 +408,7 @@ spec:
       containers:
       - name: frontend
 
-        image: <aws-account-id>.dkr.ecr.ap-south-1.amazonaws.com/ai-frontend:latest
+        image: orionpax77/ollama:frontend
 
         ports:
         - containerPort: 5173
