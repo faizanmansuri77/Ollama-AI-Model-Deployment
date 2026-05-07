@@ -177,7 +177,7 @@ module "eks" {
   version = "20.8.4"
 
   cluster_name    = "ai-agent-cluster"
-  cluster_version = "1.31"
+  cluster_version = "1.35"
 
   subnet_ids = module.vpc.private_subnets
   vpc_id     = module.vpc.vpc_id
@@ -186,7 +186,7 @@ module "eks" {
 
   eks_managed_node_groups = {
     worker_nodes = {
-      instance_types = ["t3.large"]
+      instance_types = ["c7i-flex.large"]
 
       min_size     = 1
       max_size     = 2
