@@ -6,6 +6,7 @@ from typing import List, Dict
 import ollama
 import uvicorn
 import os
+import streamlit as st
 
 app = FastAPI()
 
