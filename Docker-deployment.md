@@ -211,7 +211,7 @@ Save and exit.
 First, start only the Ollama container:
 
 ```bash
-docker-compose up -d ollama
+docker compose up -d ollama
 ```
 
 Then pull the model inside the running container:
@@ -229,7 +229,7 @@ Wait until the download is fully complete before moving to the next step.
 Now build and start all containers:
 
 ```bash
-docker-compose up -d --build
+docker compose up -d --build
 ```
 
 Check that both containers are running:
@@ -274,7 +274,7 @@ If everything is working correctly, you will see no connection errors in the out
 To stop all running containers:
 
 ```bash
-docker-compose down
+docker compose down
 ```
 
 ---
